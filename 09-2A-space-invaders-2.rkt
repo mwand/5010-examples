@@ -61,7 +61,7 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; INTERFACEs
+;; INTERFACES
 
 ;; Every object that lives in the world must implement the Widget<%>
 ;; interface.

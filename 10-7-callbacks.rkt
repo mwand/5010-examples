@@ -414,8 +414,8 @@
 
     ;; -> Integer
     ;; position of the ball at the next tick
-    ;; STRATEGY: ask the wall for its position and use that to
-    ;; calculate the upper bound for the ball's x position
+    ;; STRATEGY: use the ball's cached copy of the wall position to
+    ;; set the upper limit of motion
     (define (next-x-pos)
       (limit-value
         radius
@@ -560,9 +560,9 @@
 
     
     ; after-button-down : Integer Integer -> Void
-    ; GIVEN: the location of a button-down event
-    ; STRATEGY: Cases on whether the event is in the helicopter
-    (define/public (after-button-down mx my)
+    ; GIVEN: the (x, y) location of a button-down event
+    ; EFFECT: if the event is near the wall, make the wall selected.
+    ; STRATEGY: Cases on whether the event is near the wall
       (if (near-wall? mx)
         ;; (new Wall%
         ;;   [pos pos]
@@ -575,8 +575,8 @@
         this))  ;; but an if needs an else clause :-(
 
     ; after-button-up : Integer Integer -> Void
-    ; GIVEN: the location of a button-up event
-    ; RETURNS: a Wall like this one, but unselected
+    ; GIVEN: the (x,y) location of a button-up event
+    ; EFFECT: makes the Wall unselected
     (define/public (after-button-up mx my)
       ;; (new Wall%
       ;;   [pos pos]
@@ -590,7 +590,7 @@
     ; STRATEGY: Cases on whether the wall is selected.
     ; If it is selected, move it so that the vector from its position to
     ; the drag event is equal to saved-mx.  Report the new position to
-    ; the subscribers
+    ; the registered balls.
     (define/public (after-drag mx my)
       (if selected?
         ;; (new Wall%

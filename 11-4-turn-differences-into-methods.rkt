@@ -1,13 +1,23 @@
 #lang racket
 
-;; 10-6-push-model
+;; 11-4-turn-differences-into-methods.rkt
+;; local functions in the subclasses weren't accessible from the
+;; superclass.
+;; So turn them into methods, and call them with 'this'
+;; We'll clean up a bit as we go, so we can see what we're doing.
 
-;; Instead of every ball pulling information from the wall at every
-;; tick, the wall notifies each ball, but only when the wall moves.
+;; 11-3-unify-try1.rkt
+;; Factor common parts of implementation of Ball% and Square%
+;; into a superclass DraggableWidget%
 
-;; To do this, each ball will have to have a stable identity, so the
-;; wall can send it messages.
+;; We'll do this by simply copying Ball% to DraggableWidget% and
+;; commenting out the parts that differ between Ball% and Square%.
 
+;; 11-2-squares.rkt
+;; adds squares ("s")
+
+;; 11-1-flashing-balls.rkt :
+;; extends 10-6-push-model by adding a flashing ball ("f")
 
 (require rackunit)
 (require 2htdp/universe)
@@ -29,12 +39,9 @@
 
 (define INIT-BALL-X (/ CANVAS-HEIGHT 2))
 (define INIT-BALL-Y (/ CANVAS-WIDTH 3))
-(define INIT-BALL-SPEED 30)
+(define INIT-BALL-SPEED 25)
 
 (define INITIAL-WALL-POSITION 300)
-
-
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -152,10 +159,13 @@
     add-to-scene
     ))
 
+;; while we're at it, we'll rename the interfaces to reflect their
+;; generic nature.
 
-;; Additional method for Ball:
+;; Additional method for Ball and other classes that receive messages
+;; from the wall:
 
-(define SBall<%>
+(define SWidgetListener<%>
   (interface (SWidget<%>)
 
     ; Int -> Void
@@ -166,38 +176,37 @@
 
 ;; Additional method for Wall:
 
-(define SWall<%>
+(define SWidgetPublisher<%>
   (interface (SWidget<%>)
 
-    ; SBall<%> -> Int
-    ; GIVEN: An SBall<%>
-    ; EFFECT: registers the ball to receive position updates from this wall.
-    ; RETURNS: the x-position of the wall
+    ; SWidgetListener<%> -> Int
+    ; GIVEN: An SWidgetListener<%>
+    ; EFFECT: registers the listener to receive position updates from this wall.
+    ; RETURNS: the current x-position of the wall
     register
 
     ))
-
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
 ;; initial-world : -> WorldState
 ;; RETURNS: a world with a wall, a ball, and a factory
-
 (define (initial-world)
   (local
     ((define the-wall (new Wall%))
      (define the-ball (new Ball% [w the-wall]))
      (define the-world
        (make-world-state 
-         empty
-         (list the-ball the-wall)))
+         empty ; (list the-ball)  -- the ball is now stateful
+         (list the-wall)))
      (define the-factory
-       (new BallFactory% [wall the-wall][world the-world])))
+       (new WidgetFactory% [wall the-wall][world the-world])))
     (begin
       ;; put the factory in the world
       (send the-world add-stateful-widget the-factory)
+      ;; tell the factory to start a ball
+      (send the-factory after-key-event "b")
       the-world)))
      
      
@@ -231,9 +240,7 @@
 
 ;; The World% class
 
-
-
-; ListOfWidget -> WorldState
+; ListOfWidget ListOfWidget -> WorldState
 (define (make-world-state objs sobjs)
   (new WorldState% [objs objs][sobjs sobjs]))
 
@@ -316,14 +323,13 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-;; The BallFactory% class
+;; The WidgetFactory% class
 
-;; accepts "b" key events and adds them to the world.
+;; accepts key events and adds SWidgetListeners to the world.
+
 ;; gets the world as an init-field
 
-;; 10-6: in the push model, the ball is a stateful widget
-
-(define BallFactory%
+(define WidgetFactory%
   (class* object% (SWidget<%>)
 
     (init-field world)  ; the world to which the factory adds balls
@@ -332,10 +338,16 @@
 
     (super-new)
 
+    ; KeyEvent -> Void
     (define/public (after-key-event kev)
       (cond
         [(key=? kev "b")
-         (send world add-stateful-widget (new Ball% [w wall]))]))
+         (send world add-stateful-widget (new Ball% [w wall]))]
+         [(key=? kev "f")
+         (send world add-stateful-widget (new FlashingBall% [w wall]))]
+         [(key=? kev "s")
+         (send world add-stateful-widget (new Square% [w wall]))]
+         ))
 
     ;; the Ball Factory has no other behavior
 
@@ -350,19 +362,18 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; The Ball% class
-
-;; A Ball is a (new Ball% 
-;;               [x Int][y Int][speed Int]
-;;               [saved-mx Integer][saved-my Integer][selected? Boolean]
-;;               [w Wall])
+;; A DraggableWidget is a (new DraggableWidget% [w Wall]) 
 
 ;; the Ball is now a stateful widget
 
-(define Ball%
-  (class* object% (SWidget<%>)
+(define DraggableWidget%
+  (class* object%
 
-    (init-field w)  ;; the Wall that the ball should bounce off of
+    ;; these guys are all stateful Widget Listeners
+    (SWidgetListener<%>)  
+
+    ;; the Wall that the ball should bounce off of
+    (init-field w)  
 
     ;; initial values of x, y (center of ball)
     (init-field [x INIT-BALL-X])
@@ -374,10 +385,8 @@
 
     ;; if this is selected, the position of
     ;; the last button-down event inside this, relative to the
-    ;; ball's center.  Else any value.
+    ;; object's center.  Else any value.
     (init-field [saved-mx 0] [saved-my 0])
-   
-    (field [radius 20])
 
     ;; register this ball with the wall, and use the result as the
     ;; initial value of wall-pos
@@ -386,102 +395,52 @@
     (super-new)
 
     ;; Int -> Void
-    ;; EFFECT: updates the ball's idea of the wall's position to the
+    ;; EFFECT: updates the widget's idea of the wall's position to the
     ;; given integer.
     (define/public (update-wall-pos n)
       (set! wall-pos n))
 
-    
     ;; after-tick : -> Void
-    ;; state of this ball after a tick.  A selected ball doesn't move.
+    ;; state of this ball after a tick.  A selected widget doesn't move.
     (define/public (after-tick)
       (if selected?
         this
-        ;; (new Ball%
-        ;;   [x (next-x-pos)]
-        ;;   [y y]
-        ;;   [speed (next-speed)]
-        ;;   [selected? selected?]
-        ;;   [saved-mx saved-mx]
-        ;;   [saved-my saved-my]
-        ;;   [w w])
-        (begin
-          (set! x (next-x-pos))
-          (set! speed (next-speed)))))
+        (let ((x1 (send this next-x-pos))
+              (speed1 (send this next-speed)))
+          (begin
+            (set! speed speed1)
+            (set! x x1)))))
 
-    ;; -> Integer
-    ;; position of the ball at the next tick
-    ;; STRATEGY: use the square's cached copy of the wall position to
-    ;; set the upper limit of motion    
-    (define (next-x-pos)
-      (limit-value
-        radius
-        (+ x speed)
-        (-  wall-pos    ; (send w get-pos) 
-          radius)))
+    ;; to be supplied by the subclasses
+    (abstract next-x-pos)
+    (abstract next-speed)
 
-    ;; Number^3 -> Number
-    ;; WHERE: lo <= hi
-    ;; RETURNS: val, but limited to the range [lo,hi]
-    (define (limit-value lo val hi)
-      (max lo (min val hi)))
-
-    ;; -> Integer
-    ;; RETURNS: the velocity of the ball at the next tick
-    ;; STRATEGY: if the ball will be at its limit, negate the
-    ;; velocity, otherwise return it unchanged
-    (define (next-speed)
-      (if (or
-            (= (next-x-pos) radius)
-            (= (next-x-pos) (- wall-pos ; (send w get-pos) 
-                              radius)))
-        (- speed)
-        speed))
-
-    (define/public (add-to-scene s)
-      (place-image
-        (circle radius 
-          "outline"
-          "red")
-        x y s))
+    (abstract add-to-scene)
 
     ; after-button-down : Integer Integer -> Void
     ; GIVEN: the location of a button-down event
     ; STRATEGY: Cases on whether the event is in this
     (define/public (after-button-down mx my)
-      (if (in-this? mx my)
-        ;; (new Ball%
-        ;;   [x x][y y][speed speed]
-        ;;   [selected? true]
-        ;;   [saved-mx (- mx x)]
-        ;;   [saved-my (- my y)]
-        ;;   [w w])
+      (if 
+        ;; (in-this? mx my)
+        (send this in-this? mx my)
         (begin
           (set! selected? true)
           (set! saved-mx (- mx x))
           (set! saved-my (- my y)))
         this))
 
-    ;; in-this? : Integer Integer -> Boolean
-    ;; GIVEN: a location on the canvas
-    ;; RETURNS: true iff the location is inside this.
-    (define (in-this? other-x other-y)
-      (<= (+ (sqr (- x other-x)) (sqr (- y other-y)))
-          (sqr radius)))
+    ;; to be supplied by the subclass
+    (abstract in-this?)
 
     ; after-button-up : Integer Integer -> Void
     ; GIVEN: the location of a button-up event
     ; STRATEGY: Cases on whether the event is in this
     ; If this is selected, then unselect it.
     (define/public (after-button-up mx my)
-      (if (in-this? mx my)
-        ;; (new Ball%
-        ;;   [x x][y y][speed speed]
-        ;;   [selected? false]
-        ;;   [saved-mx 127]
-        ;;   [saved-my 98]   ; the invariant says that if selected? is
-        ;;                    ; false, you can put anything here.
-        ;;   [w w])
+      (if
+        ;; (in-this? mx my)
+        (send this in-this? mx my)
         (set! selected? false)
         this))
 
@@ -492,35 +451,298 @@
     ; the drag event is equal to (mx, my)
     (define/public (after-drag mx my)
       (if selected?
-        ;; (new Ball%
-        ;;   [x (- mx saved-mx)]
-        ;;   [y (- my saved-my)]
-        ;;   [speed speed]
-        ;;   [selected? true]
-        ;;   [saved-mx saved-mx]
-        ;;   [saved-my saved-my]
-        ;;   [w w])
         (begin
           (set! x (- mx saved-mx))
           (set! y (- my saved-my)))
         this))   
 
-    ;; the ball ignores key events
+    ;; the widget ignores key events
     (define/public (after-key-event kev) this)
-
-    (define/public (for-test:x) x)
-    (define/public (for-test:speed) speed)
-    (define/public (for-test:wall-pos) wall-pos)
+    (define/public (for-test:x)          x)
+    (define/public (for-test:speed)      speed)
+    (define/public (for-test:wall-pos)   wall-pos)
     (define/public (for-test:next-speed) (next-speed))
     (define/public (for-test:next-x)     (next-x-pos))
     
+    ))
+
+
+;; Hooks left over: these methods must be filled in from subclass.
+
+(define DraggableWidgetHooks<%>
+  (interface ()
+
+    ;; Int Int -> Boolean
+    ;; is the given location in this widget?
+    in-this?
+
+    ;; -> Int
+    ;; RETURN: the next x position or speed of this widget
+    next-x-pos
+    next-speed
+
+    ))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; The Ball% class
+
+;; A Ball is a (new Ball% [w Wall])
+
+(define Ball%
+  (class*
+
+    ;; inherit method implementations from DraggableWidget%
+    DraggableWidget%
+    
+    ;; must implement SBall + the open hooks from the superclass
+    (SWidgetListener<%> DraggableWidgetHooks<%>)
+
+    ;; inherit all these fields from the superclass:
+
+    ;; the Wall that the ball should bounce off of
+    (inherit-field w)  
+
+    ;; initial values of x, y (center of ball) and speed:
+    (inherit-field x y speed)
+
+    ; is this selected? Default is false.
+    (inherit-field selected?) 
+
+    ;; position of the wall, updated by update-wall-pos
+    (inherit-field wall-pos)
+
+    ; don't need to inherit these: all dragging is handled in the superclass
+    ;(inherit-field [saved-mx 0] [saved-my 0])
+   
+    ;; this field is local to Ball%
+    (field [radius 20])
+
+    (super-new)
+
+    ;; make this a method instead of a function:
+
+    ;; -> Integer
+    ;; position of the ball at the next tick
+    ;; STRATEGY: use the ball's cached copy of the wall position to
+    ;; set the upper limit of motion
+    (define/override (next-x-pos)
+      (limit-value
+        radius
+        (+ x speed)
+        (-  wall-pos radius)))
+
+    ;; Number^3 -> Number
+    ;; WHERE: lo <= hi
+    ;; RETURNS: val, but limited to the range [lo,hi]
+    (define (limit-value lo val hi)
+      (max lo (min val hi)))
+
+    ;; make this a method instead of a function:
+
+    ;; -> Integer
+    ;; RETURNS: the velocity of the ball at the next tick
+    ;; STRATEGY: if the ball will not be at its limit, return it
+    ;; unchanged. Otherwise, negate the velocity.
+    (define/override (next-speed)
+      (if
+        (< radius (next-x-pos) (- wall-pos radius))
+        speed
+        (- speed)))
+
+    ;; this overrides the 'abstract' in the superclass:
+
+    (define/override (add-to-scene s)
+      (place-image
+        (circle radius 
+          "outline"
+          "red")
+        x y s))
+
+    ;; in-this? : Integer Integer -> Boolean
+    ;; GIVEN: a location on the canvas
+    ;; RETURNS: true iff the location is inside this.
+    (define/override (in-this? other-x other-y)
+      (<= (+ (sqr (- x other-x)) (sqr (- y other-y)))
+          (sqr radius)))
+    
+    ))
+
+;; unit tests for ball:
+
+(begin-for-test
+  (local
+    ((define wall1 (new Wall% [pos 200]))
+     (define ball1 (new Ball% [x 110][speed 50][w wall1])))
+
+    (check-equal? (send ball1 for-test:speed) 50)
+    (check-equal? (send ball1 for-test:wall-pos) 200)
+
+    (check-equal? (send ball1 for-test:next-speed) 50)
+    (check-equal? (send ball1 for-test:next-x) 160)
+
+    (send ball1 after-tick)
+
+    (check-equal? (send ball1 for-test:x) 160)
+    (check-equal? (send ball1 for-test:speed) 50)
+
+    (send ball1 after-tick)
+
+    (check-equal? (send ball1 for-test:x) 180)
+    (check-equal? (send ball1 for-test:speed) -50)
+
+    ))
+
+(begin-for-test
+  (local
+    ((define wall1 (new Wall% [pos 200]))
+     (define ball1 (new Ball% [x 160][speed 50][w wall1])))
+
+    (check-equal? (send ball1 for-test:x) 160)
+    (check-equal? (send ball1 for-test:speed) 50)
+
+    (check-equal? (send ball1 for-test:next-x) 180)
+    (check-equal? (send ball1 for-test:next-speed) -50)
+
+    (send ball1 after-tick)
+
+    (check-equal? (send ball1 for-test:x) 180)
+    (check-equal? (send ball1 for-test:speed) -50)
 
     ))
 
 
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; FlashingBall% is like a Ball%, but it displays differently: it
+;; changes color on every fourth tick
+
+(define FlashingBall%
+  (class* Ball% (SWidgetListener<%>)                        ; 
+
+    ;; here are fields of the superclass that we need.
+    ;; we should copy the interpretations here so we'll know what they mean.
+    (inherit-field radius x y selected?)   
+
+    ; how much time between color changes?
+    (field [color-change-interval 4])   
+    ; time left til next color change
+    (field [time-left color-change-interval])  
+    ; the list of possible colors, first elt is current color
+    (field [colors (list "red" "green")])  
+
+    ;; the value for init-field w is sent to the superclass.
+    (super-new)
+
+    ;; FlashingBall% behaves just like Ball%, except for add-to-scene.
+    ;; so we'll find on-tick, on-key, on-mouse methods in Ball%
+
+     ;; Scene -> Scene
+    ;; RETURNS: a scene like the given one, but with the flashing ball
+    ;; painted on it.
+    ;; EFFECT: decrements time-left and changes colors if necessary
+    (define/override (add-to-scene s)
+      (begin
+        ;; is it time to change colors?
+        (if (zero? time-left)
+          (change-colors)
+          (set! time-left (- time-left 1)))
+        ;; now paint yourself on the scene
+        (place-image
+          (circle radius
+            (if selected? "solid" "outline")
+            (first colors))
+          x y s)))
+
+    ;; -> Void
+    ;; EFFECT: rotate the list of colors, and reset time-left
+    (define (change-colors)
+      (set! colors (append (rest colors) (list (first colors))))
+      (set! time-left color-change-interval))
+    
+    ))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
+;; now we'll do the same thing for Square%:
+
+;; Square is like Ball, but it has different geometry.
+
+(define Square%
+  (class* DraggableWidget%
+
+    ;; must implement SWidgetListener + the open hooks from the superclass
+    (SWidgetListener<%> DraggableWidgetHooks<%>)
+
+    (inherit-field w)  ;; the Wall that the square should bounce off of
+
+    ;; initial values of x, y (center of square)
+    (inherit-field x y speed)
+
+    ; is this selected? Default is false.
+    (inherit-field selected?) 
+
+    (inherit-field wall-pos)
+
+    ;; don't need saved-mx saved-my
+    ;; (inherit-field saved-mx saved-my)
+   
+    (field [size 40])
+    (field [half-size (/ size 2)])
+
+    (super-new)
+
+    ;; Square-specific: turn into method
+
+    ;; -> Integer
+    ;; position of the square at the next tick
+    ;; STRATEGY: use the square's cached copy of the wall position to
+    ;; set the upper limit of motion
+    (define/override (next-x-pos)
+      (limit-value
+        half-size
+        (+ x speed)
+        (-  wall-pos half-size)))
+
+    ;; Number^3 -> Number
+    ;; WHERE: lo <= hi
+    ;; RETURNS: val, but limited to the range [lo,hi]
+    (define (limit-value lo val hi)
+      (max lo (min val hi)))
+
+    ;; Square-specific: turn into method
+
+    ;; -> Integer
+    ;; RETURNS: the velocity of the square at the next tick
+    ;; STRATEGY: if the square will not be at its limit, return it
+    ;; unchanged. Otherwise, negate the velocity.
+    (define/override (next-speed)
+      (if
+        (< half-size (next-x-pos) (- wall-pos half-size))
+        speed
+        (- speed)))
+
+    (define/override (add-to-scene s)
+      (place-image
+        (square size 
+         (if selected? "solid" "outline")
+         "green")
+        x y s))
+
+    ;; square-specific:
+
+    ;; in-this? : Integer Integer -> Boolean
+    ;; GIVEN: a location on the canvas
+    ;; RETURNS: true iff the location is inside this.
+    (define/override (in-this? other-x other-y)
+      (and
+       (<= (- x half-size) other-x (+ x half-size))
+       (<= (- y half-size) other-y (+ y half-size))))
+    
+    ))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -532,7 +754,7 @@
 ;; all these fields have default values.
 
 (define Wall%
-  (class* object% (SWall<%>)
+  (class* object% (SWidgetPublisher<%>)
 
     (init-field [pos INITIAL-WALL-POSITION]) ; the x position of the wall
 
@@ -543,14 +765,16 @@
     ;; the last button-down event near the wall
     (init-field [saved-mx 0])
        
-    (field [balls empty])  ;; the list of registered balls
+    ;; the list of registered balls
+    ;; ListOfBall
+    (field [balls empty])  
 
     (super-new)
 
     ;; the extra behavior for Wall<%>
     ;; (define/public (get-pos) pos)
 
-    ;; SBall<%> -> Int
+    ;; Ball<%> -> Int
     ;; EFFECT: registers the given ball
     ;; RETURNS: the current position of the wall
     (define/public (register b)
@@ -558,32 +782,21 @@
         (set! balls (cons b balls))
         pos))
 
-
-    
     ; after-button-down : Integer Integer -> Void
-    ; GIVEN: the location of a button-down event
-    ; EFFECT: makes the wall selected
+    ; GIVEN: the (x, y) location of a button-down event
+    ; EFFECT: if the event is near the wall, make the wall selected.
     ; STRATEGY: Cases on whether the event is near the wall
     (define/public (after-button-down mx my)
       (if (near-wall? mx)
-        ;; (new Wall%
-        ;;   [pos pos]
-        ;;   [selected? true]
-        ;;   [saved-mx (- mx pos)])
         (begin
           (set! selected? true)
           (set! saved-mx (- mx pos)))
-          ;; don't need to worry about returning this
-        this))  ;; but an if needs an else clause :-(
+        this))  ;; if needs an else clause :-(
 
     ; after-button-up : Integer Integer -> Void
     ; GIVEN: the (x,y) location of a button-up event
     ; EFFECT: makes the Wall unselected
     (define/public (after-button-up mx my)
-      ;; (new Wall%
-      ;;   [pos pos]
-      ;;   [selected? false]
-      ;;   [saved-mx saved-mx])
       (set! selected? false))
       
 
@@ -592,16 +805,11 @@
     ; STRATEGY: Cases on whether the wall is selected.
     ; If it is selected, move it so that the vector from its position to
     ; the drag event is equal to saved-mx.  Report the new position to
-    ; the registered balls.
+    ; the registered listeners
     (define/public (after-drag mx my)
       (if selected?
-        ;; (new Wall%
-        ;;   [pos (- mx saved-mx)]
-        ;;   [selected? true]
-        ;;   [saved-mx saved-mx])
         (begin
           (set! pos (- mx saved-mx))
-          ;; NEW in push-model:
           (for-each
             (lambda (b) (send b update-wall-pos pos))
             balls))
@@ -622,118 +830,6 @@
     ;; the wall has no other behaviors
     (define/public (after-tick) this)
     (define/public (after-key-event kev) this)
-
-    ;; test methods
-    ;; don't need deliverables for these.
-    (define/public (for-test:get-pos) pos)
     
     ))
-
-;;   (new Wall% [pos Integer]
-;;                      [saved-mx Integer]
-;;                      [selected? Boolean])
-
-;; in the push model, the wall doesn't have a get-pos method, so we
-;; need to add one for testing.
-
-;; select wall, then drag
-(begin-for-test
-  (local
-    ;; create a wall
-    ((define wall1 (new Wall% [pos 200])))
-    ;; check to see that it's in the right place
-    (check-equal? (send wall1 for-test:get-pos) 200)
-    ;; now select it, then drag it 40 pixels 
-    (send wall1 after-button-down 202 100)
-    (send wall1 after-drag        242 180)
-    ;; is the wall in the right place?
-    (check-equal? (send wall1 for-test:get-pos) 240)))
-
-;; don't select wall, then drag
-(begin-for-test
-  (local
-    ;; create a wall
-    ((define wall1 (new Wall% [pos 200])))
-    ;; check to see that it's in the right place
-    (check-equal? (send wall1 for-test:get-pos) 200)
-    ;; button-down, but not close enough
-    (send wall1 after-button-down 208 100)
-    (send wall1 after-drag        242 180)
-    ;; wall shouldn't move
-    (check-equal? (send wall1 for-test:get-pos) 200)))
-
-;; test bouncing ball
-(begin-for-test
-  (local
-    ((define wall1 (new Wall% [pos 200]))
-     (define ball1 (new Ball% [x 170][speed 50][w wall1])))
-
-    ;; ball created ok?
-    (check-equal? (send ball1 for-test:speed) 50)
-    (check-equal? (send ball1 for-test:wall-pos) 200)
-
-    (send ball1 after-tick)
-
-    (check-equal? (send ball1 for-test:x) 180)
-    (check-equal? (send ball1 for-test:speed) -50)
-
-    ))
-
-;; we tried this at different starting positions.  Here's the first
-;; one that failed.  
-(begin-for-test
-  (local
-    ((define wall1 (new Wall% [pos 200]))
-     (define ball1 (new Ball% [x 110][speed 50][w wall1])))
-
-    (check-equal? (send ball1 for-test:speed) 50)
-    (check-equal? (send ball1 for-test:wall-pos) 200)
-
-;    (check-equal? (send ball1 for-test:next-x) 160)
-;    (check-equal? (send ball1 for-test:next-speed) 50)
-
-    (send ball1 after-tick)
-
-    (check-equal? (send ball1 for-test:x) 160)
-    (check-equal? (send ball1 for-test:speed) 50)
-
-    ))
-
-;; position is right, but speed is wrong!  Our calculation for speed
-;; looks right, but let's check it.  We'll add some test methods that
-;; just call next-x and next-speed:
-
-
-(begin-for-test
-  (local
-    ((define wall1 (new Wall% [pos 200]))
-     (define ball1 (new Ball% [x 110][speed 50][w wall1])))
-
-    (check-equal? (send ball1 for-test:speed) 50)
-    (check-equal? (send ball1 for-test:wall-pos) 200)
-
-    (check-equal? (send ball1 for-test:next-x) 160)
-    (check-equal? (send ball1 for-test:next-speed) 50)
-
-    (send ball1 after-tick)
-
-    (check-equal? (send ball1 for-test:x) 160)
-    (check-equal? (send ball1 for-test:speed) 50)
-
-    ))
-
-;; Hmm, next-speed returns 50, but when we do after-tick, the speed of
-;; the resulting ball is -50.  What happened?
-
-;; Oh no! we did a set! between (next-x) and (next-speed).  next-speed
-;; depends on x, so when we did the (set! x ...) we changed the value
-;; of x, so when we actually computed (next-speed) it was looking at
-;; the new value of x, not the old value.
-
-;; Reversing the order of the set!'s doesn't help, because (next-x)
-;; also depends on speed.  So we need to compute both values _before_
-;; we do the set!'s.  See GP 10.1 for more examples like this.
-
-;; See 10-6-push-model-fixed for the repaired code.
-
 

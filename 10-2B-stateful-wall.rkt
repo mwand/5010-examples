@@ -453,7 +453,8 @@
     (define/public (get-pos) pos)
     
     ; after-button-down : Integer Integer -> Void
-    ; GIVEN: the location of a button-down event
+    ; GIVEN: the (x, y) location of a button-down event
+    ; EFFECT: if the event is near the wall, make the wall selected.
     ; STRATEGY: Cases on whether the event is near the wall
     (define/public (after-button-down mx my)
       (if (near-wall? mx)
@@ -469,8 +470,8 @@
         42))
 
     ; after-button-up : Integer Integer -> Void
-    ; GIVEN: the location of a button-up event
-    ; RETURNS: a Wall like this one, but unselected
+    ; GIVEN: the (x,y) location of a button-up event
+    ; EFFECT: makes the Wall unselected
     (define/public (after-button-up mx my)
       ;; (new Wall%
       ;;   [pos pos]

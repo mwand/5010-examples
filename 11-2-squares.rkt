@@ -1,13 +1,10 @@
 #lang racket
 
-;; 10-6-push-model
+;; 11-2-squares.rkt
+;; adds squares ("s")
 
-;; Instead of every ball pulling information from the wall at every
-;; tick, the wall notifies each ball, but only when the wall moves.
-
-;; To do this, each ball will have to have a stable identity, so the
-;; wall can send it messages.
-
+;; 11-1-flashing-balls.rkt :
+;; extends 10-6-push-model by adding a flashing ball ("f")
 
 (require rackunit)
 (require 2htdp/universe)
@@ -29,12 +26,9 @@
 
 (define INIT-BALL-X (/ CANVAS-HEIGHT 2))
 (define INIT-BALL-Y (/ CANVAS-WIDTH 3))
-(define INIT-BALL-SPEED 30)
+(define INIT-BALL-SPEED 25)
 
 (define INITIAL-WALL-POSITION 300)
-
-
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -184,20 +178,21 @@
 
 ;; initial-world : -> WorldState
 ;; RETURNS: a world with a wall, a ball, and a factory
-
 (define (initial-world)
   (local
     ((define the-wall (new Wall%))
      (define the-ball (new Ball% [w the-wall]))
      (define the-world
        (make-world-state 
-         empty
-         (list the-ball the-wall)))
+         empty ; (list the-ball)  -- the ball is now stateful
+         (list the-wall)))
      (define the-factory
        (new BallFactory% [wall the-wall][world the-world])))
     (begin
       ;; put the factory in the world
       (send the-world add-stateful-widget the-factory)
+      ;; tell the factory to start a ball
+      (send the-factory after-key-event "b")
       the-world)))
      
      
@@ -231,9 +226,7 @@
 
 ;; The World% class
 
-
-
-; ListOfWidget -> WorldState
+; ListOfWidget ListOfWidget -> WorldState
 (define (make-world-state objs sobjs)
   (new WorldState% [objs objs][sobjs sobjs]))
 
@@ -335,7 +328,12 @@
     (define/public (after-key-event kev)
       (cond
         [(key=? kev "b")
-         (send world add-stateful-widget (new Ball% [w wall]))]))
+         (send world add-stateful-widget (new Ball% [w wall]))]
+         [(key=? kev "f")
+         (send world add-stateful-widget (new FlashingBall% [w wall]))]
+         [(key=? kev "s")
+         (send world add-stateful-widget (new Square% [w wall]))]
+))
 
     ;; the Ball Factory has no other behavior
 
@@ -360,7 +358,7 @@
 ;; the Ball is now a stateful widget
 
 (define Ball%
-  (class* object% (SWidget<%>)
+  (class* object% (SBall<%>)
 
     (init-field w)  ;; the Wall that the ball should bounce off of
 
@@ -397,22 +395,19 @@
     (define/public (after-tick)
       (if selected?
         this
-        ;; (new Ball%
-        ;;   [x (next-x-pos)]
-        ;;   [y y]
-        ;;   [speed (next-speed)]
-        ;;   [selected? selected?]
-        ;;   [saved-mx saved-mx]
-        ;;   [saved-my saved-my]
-        ;;   [w w])
-        (begin
-          (set! x (next-x-pos))
-          (set! speed (next-speed)))))
+        (let ((x1 (next-x-pos))
+              (speed1 (next-speed)))
+          ;; (next-speed) depends on x, and (next-x-pos) depends on
+          ;; speed, so they have to be done independently before doing
+          ;; any assignments.
+          (begin
+            (set! speed speed1)
+            (set! x x1)))))
 
     ;; -> Integer
     ;; position of the ball at the next tick
-    ;; STRATEGY: use the square's cached copy of the wall position to
-    ;; set the upper limit of motion    
+    ;; STRATEGY: use the ball's cached copy of the wall position to
+    ;; set the upper limit of motion
     (define (next-x-pos)
       (limit-value
         radius
@@ -428,15 +423,13 @@
 
     ;; -> Integer
     ;; RETURNS: the velocity of the ball at the next tick
-    ;; STRATEGY: if the ball will be at its limit, negate the
-    ;; velocity, otherwise return it unchanged
+    ;; STRATEGY: if the ball will not be at its limit, return it
+    ;; unchanged. Otherwise, negate the velocity.
     (define (next-speed)
-      (if (or
-            (= (next-x-pos) radius)
-            (= (next-x-pos) (- wall-pos ; (send w get-pos) 
-                              radius)))
-        (- speed)
-        speed))
+      (if
+        (< radius (next-x-pos) (- wall-pos radius))
+        speed
+        (- speed)))
 
     (define/public (add-to-scene s)
       (place-image
@@ -450,12 +443,6 @@
     ; STRATEGY: Cases on whether the event is in this
     (define/public (after-button-down mx my)
       (if (in-this? mx my)
-        ;; (new Ball%
-        ;;   [x x][y y][speed speed]
-        ;;   [selected? true]
-        ;;   [saved-mx (- mx x)]
-        ;;   [saved-my (- my y)]
-        ;;   [w w])
         (begin
           (set! selected? true)
           (set! saved-mx (- mx x))
@@ -475,13 +462,6 @@
     ; If this is selected, then unselect it.
     (define/public (after-button-up mx my)
       (if (in-this? mx my)
-        ;; (new Ball%
-        ;;   [x x][y y][speed speed]
-        ;;   [selected? false]
-        ;;   [saved-mx 127]
-        ;;   [saved-my 98]   ; the invariant says that if selected? is
-        ;;                    ; false, you can put anything here.
-        ;;   [w w])
         (set! selected? false)
         this))
 
@@ -492,14 +472,6 @@
     ; the drag event is equal to (mx, my)
     (define/public (after-drag mx my)
       (if selected?
-        ;; (new Ball%
-        ;;   [x (- mx saved-mx)]
-        ;;   [y (- my saved-my)]
-        ;;   [speed speed]
-        ;;   [selected? true]
-        ;;   [saved-mx saved-mx]
-        ;;   [saved-my saved-my]
-        ;;   [w w])
         (begin
           (set! x (- mx saved-mx))
           (set! y (- my saved-my)))
@@ -508,19 +480,252 @@
     ;; the ball ignores key events
     (define/public (after-key-event kev) this)
 
-    (define/public (for-test:x) x)
-    (define/public (for-test:speed) speed)
-    (define/public (for-test:wall-pos) wall-pos)
+    (define/public (for-test:x)          x)
+    (define/public (for-test:speed)      speed)
+    (define/public (for-test:wall-pos)   wall-pos)
     (define/public (for-test:next-speed) (next-speed))
     (define/public (for-test:next-x)     (next-x-pos))
     
 
     ))
 
+;; unit test for ball:
+
+(begin-for-test
+  (local
+    ((define wall1 (new Wall% [pos 200]))
+     (define ball1 (new Ball% [x 110][speed 50][w wall1])))
+
+    (check-equal? (send ball1 for-test:speed) 50)
+    (check-equal? (send ball1 for-test:wall-pos) 200)
+
+    (check-equal? (send ball1 for-test:next-speed) 50)
+    (check-equal? (send ball1 for-test:next-x) 160)
+
+    (send ball1 after-tick)
+
+    (check-equal? (send ball1 for-test:x) 160)
+    (check-equal? (send ball1 for-test:speed) 50)
+
+    (send ball1 after-tick)
+
+    (check-equal? (send ball1 for-test:x) 180)
+    (check-equal? (send ball1 for-test:speed) -50)
+
+    ))
+
+(begin-for-test
+  (local
+    ((define wall1 (new Wall% [pos 200]))
+     (define ball1 (new Ball% [x 160][speed 50][w wall1])))
+
+    (check-equal? (send ball1 for-test:x) 160)
+    (check-equal? (send ball1 for-test:speed) 50)
+
+    (check-equal? (send ball1 for-test:next-x) 180)
+    (check-equal? (send ball1 for-test:next-speed) -50)
+
+    (send ball1 after-tick)
+
+    (check-equal? (send ball1 for-test:x) 180)
+    (check-equal? (send ball1 for-test:speed) -50)
+
+    ))
+
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; FlashingBall% is like a Ball%, but it displays differently: it
+;; changes color on every fourth tick.
+(define FlashingBall%
+  (class* 
+    Ball%                               ; inherits from Ball%
+    (SBall<%>)                        ; 
+
+    (field [color-change-interval 4])   ; how much time between color changes?
+    (field [time-left color-change-interval])  ; how much time left
+                                        ; til next color change
+
+    (field [colors (list "red" "green")])  ; the list of possible
+                                        ; colors, first elt is current color
+    
+    ;; here are fields of the superclass that we need.
+    ;; note that we have to make radius a field rather than a constant.
+    (inherit-field radius x y selected?)   
+
+    
+    ;; the value for init-field w is sent to the superclass.
+    (super-new)
+
+    ;; FlashingBall% behaves just like Ball%, except for add-to-scene.
+    ;; so we'll find on-tick, on-key, on-mouse methods in Ball%
+
+     ;; Scene -> Scene
+    ;; RETURNS: a scene like the given one, but with the flashing ball
+    ;; painted on it.
+    ;; EFFECT: decrements time-left and changes colors if necessary
+    (define/override (add-to-scene s)
+      (begin
+        ;; is it time to change colors?
+        (if (zero? time-left)
+          (change-colors)
+          (set! time-left (- time-left 1)))
+        ;; now paint yourself on the scene
+        (place-image
+          (circle radius
+            (if selected? "solid" "outline")
+            (first colors))
+          x y s)))
+
+;; the place-image could be replaced by (super add-to-scene s)
+
+    ;; -> Void
+    ;; EFFECT: rotate the list of colors, and reset time-left
+    (define (change-colors)
+      (set! colors (append (rest colors) (list (first colors))))
+      (set! time-left color-change-interval))
+    
+    ))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
+;; Square is like Ball, but it has different geometry.
+
+(define Square%
+  (class* object% (SBall<%>)
+
+    (init-field w)  ;; the Wall that the square should bounce off of
+
+    ;; initial values of x, y (center of square)
+    (init-field [x INIT-BALL-X])
+    (init-field [y INIT-BALL-Y])
+    (init-field [speed INIT-BALL-SPEED])
+
+    ; is this selected? Default is false.
+    (init-field [selected? false]) 
+
+    ;; if this is selected, the position of
+    ;; the last button-down event inside this, relative to the
+    ;; square's center.  Else any value.
+    (init-field [saved-mx 0] [saved-my 0])
+   
+    (field [size 40])
+    (field [half-size (/ size 2)])
+
+    ;; register this square with the wall, and use the result as the
+    ;; initial value of wall-pos
+    (field [wall-pos (send w register this)])
+    
+    (super-new)
+
+    ;; Int -> Void
+    ;; EFFECT: updates the square's idea of the wall's position to the
+    ;; given integer.
+    (define/public (update-wall-pos n)
+      (set! wall-pos n))
+
+    ;; after-tick : -> Void
+    ;; state of this square after a tick.  A selected square doesn't move.
+
+    (define/public (after-tick)
+      (if selected?
+        this
+        (let ((x1 (next-x-pos))
+              (speed1 (next-speed)))
+          ;; (next-speed) depends on x, and (next-x-pos) depends on
+          ;; speed, so they have to be done independently before doing
+          ;; any assignments.
+          (begin
+            (set! speed speed1)
+            (set! x x1)))))
+
+    ;; -> Integer
+    ;; position of the square at the next tick
+    ;; STRATEGY: use the square's cached copy of the wall position to
+    ;; set the upper limit of motion
+    (define (next-x-pos)
+      (limit-value
+        half-size
+        (+ x speed)
+        (-  wall-pos half-size)))
+
+    ;; Number^3 -> Number
+    ;; WHERE: lo <= hi
+    ;; RETURNS: val, but limited to the range [lo,hi]
+    (define (limit-value lo val hi)
+      (max lo (min val hi)))
+
+    ;; -> Integer
+    ;; RETURNS: the velocity of the square at the next tick
+    ;; STRATEGY: if the square will not be at its limit, return it
+    ;; unchanged. Otherwise, negate the velocity.
+    (define (next-speed)
+      (if
+        (< half-size (next-x-pos) (- wall-pos half-size))
+        speed
+        (- speed)))
+
+    (define/public (add-to-scene s)
+      (place-image
+        (square size 
+         (if selected? "solid" "outline")
+         "green")
+        x y s))
+
+    ; after-button-down : Integer Integer -> Void
+    ; GIVEN: the location of a button-down event
+    ; STRATEGY: Cases on whether the event is in this
+    (define/public (after-button-down mx my)
+      (if (in-this? mx my)
+        (begin
+          (set! selected? true)
+          (set! saved-mx (- mx x))
+          (set! saved-my (- my y)))
+        this))
+
+    ;; in-this? : Integer Integer -> Boolean
+    ;; GIVEN: a location on the canvas
+    ;; RETURNS: true iff the location is inside this.
+    (define (in-this? other-x other-y)
+      (and
+       (<= (- x half-size) other-x (+ x half-size))
+       (<= (- y half-size) other-y (+ y half-size))))
+
+    ; after-button-up : Integer Integer -> Void
+    ; GIVEN: the location of a button-up event
+    ; STRATEGY: Cases on whether the event is in this
+    ; If this is selected, then unselect it.
+    (define/public (after-button-up mx my)
+      (if (in-this? mx my)
+        (set! selected? false)
+        this))
+
+    ; after-drag : Integer Integer -> Void
+    ; GIVEN: the location of a drag event
+    ; STRATEGY: Cases on whether the square is selected.
+    ; If it is selected, move it so that the vector from the center to
+    ; the drag event is equal to (mx, my)
+    (define/public (after-drag mx my)
+      (if selected?
+        (begin
+          (set! x (- mx saved-mx))
+          (set! y (- my saved-my)))
+        this))   
+
+    ;; the square ignores key events
+    (define/public (after-key-event kev) this)
+
+    (define/public (for-test:x)          x)
+    (define/public (for-test:speed)      speed)
+    (define/public (for-test:wall-pos)   wall-pos)
+    (define/public (for-test:next-speed) (next-speed))
+    (define/public (for-test:next-x)     (next-x-pos))
+    
+
+    ))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -543,14 +748,16 @@
     ;; the last button-down event near the wall
     (init-field [saved-mx 0])
        
-    (field [balls empty])  ;; the list of registered balls
+    ;; the list of registered balls
+    ;; ListOfBall
+    (field [balls empty])  
 
     (super-new)
 
     ;; the extra behavior for Wall<%>
     ;; (define/public (get-pos) pos)
 
-    ;; SBall<%> -> Int
+    ;; Ball<%> -> Int
     ;; EFFECT: registers the given ball
     ;; RETURNS: the current position of the wall
     (define/public (register b)
@@ -558,11 +765,9 @@
         (set! balls (cons b balls))
         pos))
 
-
-    
     ; after-button-down : Integer Integer -> Void
-    ; GIVEN: the location of a button-down event
-    ; EFFECT: makes the wall selected
+    ; GIVEN: the (x, y) location of a button-down event
+    ; EFFECT: if the event is near the wall, make the wall selected.
     ; STRATEGY: Cases on whether the event is near the wall
     (define/public (after-button-down mx my)
       (if (near-wall? mx)
@@ -592,7 +797,7 @@
     ; STRATEGY: Cases on whether the wall is selected.
     ; If it is selected, move it so that the vector from its position to
     ; the drag event is equal to saved-mx.  Report the new position to
-    ; the registered balls.
+    ; the registered balls
     (define/public (after-drag mx my)
       (if selected?
         ;; (new Wall%
@@ -622,118 +827,6 @@
     ;; the wall has no other behaviors
     (define/public (after-tick) this)
     (define/public (after-key-event kev) this)
-
-    ;; test methods
-    ;; don't need deliverables for these.
-    (define/public (for-test:get-pos) pos)
     
     ))
-
-;;   (new Wall% [pos Integer]
-;;                      [saved-mx Integer]
-;;                      [selected? Boolean])
-
-;; in the push model, the wall doesn't have a get-pos method, so we
-;; need to add one for testing.
-
-;; select wall, then drag
-(begin-for-test
-  (local
-    ;; create a wall
-    ((define wall1 (new Wall% [pos 200])))
-    ;; check to see that it's in the right place
-    (check-equal? (send wall1 for-test:get-pos) 200)
-    ;; now select it, then drag it 40 pixels 
-    (send wall1 after-button-down 202 100)
-    (send wall1 after-drag        242 180)
-    ;; is the wall in the right place?
-    (check-equal? (send wall1 for-test:get-pos) 240)))
-
-;; don't select wall, then drag
-(begin-for-test
-  (local
-    ;; create a wall
-    ((define wall1 (new Wall% [pos 200])))
-    ;; check to see that it's in the right place
-    (check-equal? (send wall1 for-test:get-pos) 200)
-    ;; button-down, but not close enough
-    (send wall1 after-button-down 208 100)
-    (send wall1 after-drag        242 180)
-    ;; wall shouldn't move
-    (check-equal? (send wall1 for-test:get-pos) 200)))
-
-;; test bouncing ball
-(begin-for-test
-  (local
-    ((define wall1 (new Wall% [pos 200]))
-     (define ball1 (new Ball% [x 170][speed 50][w wall1])))
-
-    ;; ball created ok?
-    (check-equal? (send ball1 for-test:speed) 50)
-    (check-equal? (send ball1 for-test:wall-pos) 200)
-
-    (send ball1 after-tick)
-
-    (check-equal? (send ball1 for-test:x) 180)
-    (check-equal? (send ball1 for-test:speed) -50)
-
-    ))
-
-;; we tried this at different starting positions.  Here's the first
-;; one that failed.  
-(begin-for-test
-  (local
-    ((define wall1 (new Wall% [pos 200]))
-     (define ball1 (new Ball% [x 110][speed 50][w wall1])))
-
-    (check-equal? (send ball1 for-test:speed) 50)
-    (check-equal? (send ball1 for-test:wall-pos) 200)
-
-;    (check-equal? (send ball1 for-test:next-x) 160)
-;    (check-equal? (send ball1 for-test:next-speed) 50)
-
-    (send ball1 after-tick)
-
-    (check-equal? (send ball1 for-test:x) 160)
-    (check-equal? (send ball1 for-test:speed) 50)
-
-    ))
-
-;; position is right, but speed is wrong!  Our calculation for speed
-;; looks right, but let's check it.  We'll add some test methods that
-;; just call next-x and next-speed:
-
-
-(begin-for-test
-  (local
-    ((define wall1 (new Wall% [pos 200]))
-     (define ball1 (new Ball% [x 110][speed 50][w wall1])))
-
-    (check-equal? (send ball1 for-test:speed) 50)
-    (check-equal? (send ball1 for-test:wall-pos) 200)
-
-    (check-equal? (send ball1 for-test:next-x) 160)
-    (check-equal? (send ball1 for-test:next-speed) 50)
-
-    (send ball1 after-tick)
-
-    (check-equal? (send ball1 for-test:x) 160)
-    (check-equal? (send ball1 for-test:speed) 50)
-
-    ))
-
-;; Hmm, next-speed returns 50, but when we do after-tick, the speed of
-;; the resulting ball is -50.  What happened?
-
-;; Oh no! we did a set! between (next-x) and (next-speed).  next-speed
-;; depends on x, so when we did the (set! x ...) we changed the value
-;; of x, so when we actually computed (next-speed) it was looking at
-;; the new value of x, not the old value.
-
-;; Reversing the order of the set!'s doesn't help, because (next-x)
-;; also depends on speed.  So we need to compute both values _before_
-;; we do the set!'s.  See GP 10.1 for more examples like this.
-
-;; See 10-6-push-model-fixed for the repaired code.
-
 

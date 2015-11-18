@@ -499,9 +499,10 @@
     ;; the extra behavior for Wall<%>
     (define/public (get-pos) pos)
     
-    ; after-button-down : Integer Integer -> Wall
-    ; GIVEN: the location of a button-down event
-    ; STRATEGY: Cases on whether the event is in the helicopter
+    ; after-button-down : Integer Integer -> Void
+    ; GIVEN: the (x, y) location of a button-down event
+    ; EFFECT: if the event is near the wall, make the wall selected.
+    ; STRATEGY: Cases on whether the event is near the wall
     (define/public (after-button-down mx my)
       (if (near-wall? mx)
         ;; (new Wall%
@@ -514,9 +515,9 @@
           ;; don't need to worry about returning this
         this))  ;; but an if needs an else clause :-(
 
-    ; after-button-up : Integer Integer -> Wall
-    ; GIVEN: the location of a button-up event
-    ; RETURNS: a Wall like this one, but unselected
+    ; after-button-up : Integer Integer -> Void
+    ; GIVEN: the (x,y) location of a button-up event
+    ; EFFECT: makes the Wall unselected
     (define/public (after-button-up mx my)
       ;; (new Wall%
       ;;   [pos pos]
@@ -525,7 +526,7 @@
       (set! selected? false))
       
 
-    ; after-drag : Integer Integer -> Wall
+    ; after-drag : Integer Integer -> Void
     ; GIVEN: the location of a drag event
     ; STRATEGY: Cases on whether the wall is selected.
     ; If it is selected, move it so that the vector from its position to

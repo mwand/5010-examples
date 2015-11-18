@@ -456,9 +456,10 @@
     ;; the extra behavior for Wall<%>
     (define/public (get-pos) pos)
     
-    ; after-button-down : Integer Integer -> Wall
-    ; GIVEN: the location of a button-down event
-    ; STRATEGY: Cases on whether the event is in the helicopter
+    ; after-button-down : Integer Integer -> Void
+    ; GIVEN: the (x, y) location of a button-down event
+    ; EFFECT: if the event is near the wall, make the wall selected.
+    ; STRATEGY: Cases on whether the event is near the wall
     (define/public (after-button-down mx my)
       (if (near-wall? mx)
         ;; (new Wall%
@@ -471,9 +472,9 @@
           ;; don't need to worry about returning this
         this))  ;; but an if needs an else clause :-(
 
-    ; after-button-up : Integer Integer -> Wall
+    ; after-button-up : Integer Integer -> Void
     ; GIVEN: the location of a button-up event
-    ; RETURNS: a Wall like this one, but unselected
+    ; EFFECT: makes the Wall unselected
     (define/public (after-button-up mx my)
       ;; (new Wall%
       ;;   [pos pos]
