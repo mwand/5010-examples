@@ -628,6 +628,7 @@
     ; GIVEN: the (x, y) location of a button-down event
     ; EFFECT: if the event is near the wall, make the wall selected.
     ; STRATEGY: Cases on whether the event is near the wall
+    (define/public (after-button-down mx my) 
       (if (near-wall? mx)
         ;; (new Wall%
         ;;   [pos pos]
