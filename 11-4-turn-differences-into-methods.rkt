@@ -364,13 +364,31 @@
 
 ;; A DraggableWidget is a (new DraggableWidget% [w Wall]) 
 
-;; the Ball is now a stateful widget
+;; the methods implemented by DraggableWidget%.
+;; This includes all the methods in SWidgetListener<%> EXCEPT
+;; for add-to-scene, which is defined in the subclass
+
+(define DraggableWidget<%>
+  (interface ()
+    update-wall-pos
+    after-tick
+    after-button-down
+    after-button-up
+    after-drag))
+
 
 (define DraggableWidget%
   (class* object%
 
-    ;; these guys are all stateful Widget Listeners
-    (SWidgetListener<%>)  
+    ;; the methods implemented in the superclass
+    (DraggableWidget<%>)  
+
+    ;; the methods to be supplied by each subclass
+    (abstract 
+      next-x-pos
+      next-speed
+      in-this?)
+   
 
     ;; the Wall that the ball should bounce off of
     (init-field w)  
@@ -411,11 +429,7 @@
             (set! speed speed1)
             (set! x x1)))))
 
-    ;; to be supplied by the subclasses
-    (abstract next-x-pos)
-    (abstract next-speed)
 
-    (abstract add-to-scene)
 
     ; after-button-down : Integer Integer -> Void
     ; GIVEN: the location of a button-down event
@@ -429,9 +443,6 @@
           (set! saved-mx (- mx x))
           (set! saved-my (- my y)))
         this))
-
-    ;; to be supplied by the subclass
-    (abstract in-this?)
 
     ; after-button-up : Integer Integer -> Void
     ; GIVEN: the location of a button-up event
@@ -550,9 +561,9 @@
         speed
         (- speed)))
 
-    ;; this overrides the 'abstract' in the superclass:
+    
 
-    (define/override (add-to-scene s)
+    (define/public (add-to-scene s)
       (place-image
         (circle radius 
           "outline"
@@ -725,7 +736,7 @@
         speed
         (- speed)))
 
-    (define/override (add-to-scene s)
+    (define/public (add-to-scene s)
       (place-image
         (square size 
          (if selected? "solid" "outline")
